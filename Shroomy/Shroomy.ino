@@ -114,6 +114,7 @@ void setup() {
 void loop() {
   if (ReadSwitchSetting()) {
     RefreshStateAccordingToMode();  
+    PrintSerial(true);
   }
 
   UpdateFanStatus();
@@ -131,7 +132,7 @@ void loop() {
 
   UpdateOutPins();
 
-  PrintSerial();
+  PrintSerial(false);
   delay(500);
 }
 
@@ -142,7 +143,7 @@ void RefreshStateAccordingToMode() {
     fanMinutesPerHour = 0;
     
     IsHeatingAllowed = true;
-    Setpoint = 24;
+    Setpoint = 25;
     
     break;
   case SwitchMode2:
@@ -150,15 +151,15 @@ void RefreshStateAccordingToMode() {
     fanMinutesPerHour = 1;
     
     IsHeatingAllowed = true;
-    Setpoint = 10;
+    Setpoint = 11;
     
     break;
   case SwitchMode3:
     IsFanAllowed = true;
-    fanMinutesPerHour = 10;
+    fanMinutesPerHour = 5;
 
     IsHeatingAllowed = true;
-    Setpoint = 20;
+    Setpoint = 21;
     
     break;
   }
@@ -178,26 +179,51 @@ void UpdateFanStatus() {
 }
 
 // SP, In, AbsIn, Out, DC
-void PrintSerial() {
-  Serial.print(Setpoint);
-  Serial.print(",");
-  Serial.print(Input);
-  Serial.print(",");
-  Serial.print(Output * 0.1);
-  Serial.print(",");
-  Serial.print(DutyCycle * 100);
-  Serial.print(",");
-  Serial.print(humidity);
-  Serial.print(",");
-  Serial.print(IsHeatingAllowed);
-  Serial.print(",");
-  Serial.print(IsHeatingActive);
-  Serial.print(",");
-  Serial.print(IsFanAllowed);
-  Serial.print(",");
-  Serial.print(IsFanOn);
-  Serial.print(",");
-  Serial.println(switchMode);
+unsigned long lastSerialPrint;
+void PrintSerial(bool force) {
+  if (force || (millis() - lastSerialPrint) > 5000) {
+    lastSerialPrint = millis();
+    Serial.print("Target temp: ");
+    Serial.print(Setpoint);
+    Serial.print(", current temp: ");
+    Serial.print(Input);
+    Serial.print(", humidity: ");
+    Serial.println(humidity);
+    
+    Serial.print("Switch: ");
+    Serial.println(switchMode);
+    
+    //Serial.print("Heating permitted: ");
+    //Serial.println(IsHeatingAllowed);
+    if (IsHeatingActive) {
+      Serial.print("Heating active and ");
+    } else {
+      Serial.print("Heating inactive and ");
+    }
+    if (IsHeatingAllowed && IsInActiveWindow && IsHeatingActive) {
+      Serial.println("heating on");
+    } else {
+      Serial.println("heating off");
+    }
+
+    if (IsFanAllowed) {
+      Serial.print("Fan permitted and ");
+    } else {
+      Serial.print("Fan disallowed and ");
+    }
+    if (IsFanOn) {
+      Serial.println("is running");
+    } else {
+      Serial.println("is not running");
+    }
+    
+    Serial.print("PID target ");
+    Serial.print(Output * 0.1);
+    Serial.print(", duty cycle % ");
+    Serial.println(DutyCycle * 100);
+    
+    Serial.println("");
+  }
 }
 
 void RecalculateInputVariables() {
@@ -251,7 +277,7 @@ void CheckTemperatureSensor() {
   if (dht11.read(DHTPin, &temperature, &humidity, data)) {
     return;
   }
-  Input = (int)temperature;
+  Input = (double)temperature;
 }
 
 bool ReadSwitchSetting() {
