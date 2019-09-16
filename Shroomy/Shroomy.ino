@@ -51,6 +51,9 @@ byte temperature = 0;
 byte humidity = 0;
 byte data[40] = {0};
 
+double minTemp, maxTemp;
+bool extremesInitialised = false;
+
 // ************************************************
 // PID Variables and constants
 // ************************************************
@@ -65,6 +68,7 @@ double Output;
 volatile long onTime = 0;
 unsigned long windowStartTime;
 double DutyCycle;
+double DutyCycleCap = 0.4;
 bool IsInActiveWindow;
 bool IsHeatingActive;
 
@@ -75,6 +79,12 @@ double Kd = 0;
  
 // The PID object
 PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
+
+// ************************************************
+// Serial
+// ************************************************
+unsigned long lastSerialPrintFinish;
+int currentSerialPosition;
 
 
 void setup() {
@@ -114,13 +124,15 @@ void setup() {
 void loop() {
   if (ReadSwitchSetting()) {
     RefreshStateAccordingToMode();  
-    PrintSerial(true);
+    lastSerialPrintFinish = millis();
   }
 
   UpdateFanStatus();
   
   // Update Input temperature
-  CheckTemperatureSensor();
+  if (CheckTemperatureSensor()) {
+    CalculateMinMax();
+  }
   
   RecalculateInputVariables();
 
@@ -132,7 +144,7 @@ void loop() {
 
   UpdateOutPins();
 
-  PrintSerial(false);
+  PrintSerial();
   delay(500);
 }
 
@@ -179,22 +191,31 @@ void UpdateFanStatus() {
 }
 
 // SP, In, AbsIn, Out, DC
-unsigned long lastSerialPrint;
-void PrintSerial(bool force) {
-  if (force || (millis() - lastSerialPrint) > 5000) {
-    lastSerialPrint = millis();
+void PrintSerial() {
+  currentSerialPosition = (int) ((millis() - lastSerialPrintFinish) / 1000);
+
+  if (currentSerialPosition == 0) {
+    Serial.print("Switch: ");
+    Serial.println(switchMode);
+  }
+  
+  if (currentSerialPosition == 1) {
     Serial.print("Target temp: ");
     Serial.print(Setpoint);
     Serial.print(", current temp: ");
-    Serial.print(Input);
+    Serial.println(Input);
+  }
+  
+  if (currentSerialPosition == 2) {
+    Serial.print("Min temp: ");
+    Serial.print(minTemp);
+    Serial.print(", max temp: ");
+    Serial.print(maxTemp);
     Serial.print(", humidity: ");
     Serial.println(humidity);
-    
-    Serial.print("Switch: ");
-    Serial.println(switchMode);
-    
-    //Serial.print("Heating permitted: ");
-    //Serial.println(IsHeatingAllowed);
+  }
+
+  if (currentSerialPosition == 3) {
     if (IsHeatingActive) {
       Serial.print("Heating active and ");
     } else {
@@ -205,7 +226,9 @@ void PrintSerial(bool force) {
     } else {
       Serial.println("heating off");
     }
+  }
 
+  if (currentSerialPosition == 4) {
     if (IsFanAllowed) {
       Serial.print("Fan permitted and ");
     } else {
@@ -216,14 +239,25 @@ void PrintSerial(bool force) {
     } else {
       Serial.println("is not running");
     }
-    
+  }
+
+  if (currentSerialPosition == 5) {
     Serial.print("PID target ");
     Serial.print(Output * 0.1);
     Serial.print(", duty cycle % ");
-    Serial.println(DutyCycle * 100);
-    
-    Serial.println("");
+    Serial.print(DutyCycle * 100);
+    if (DutyCycle == DutyCycleCap) {
+      Serial.println(" (Capped)");
+    } else {
+      Serial.println("");
+    }
   }
+
+  if (currentSerialPosition == 6) {
+    lastSerialPrintFinish = millis();
+  }
+  
+  Serial.println("");
 }
 
 void RecalculateInputVariables() {
@@ -238,6 +272,12 @@ void RecalculateDutyCycle() {
   if (IsHeatingAllowed) {
     // Recalculate the duty cycle as a fraction
     DutyCycle = ((10*Output) / WindowSize);
+
+    // Apply DutyCycleCap
+    if (DutyCycle > DutyCycleCap) {
+      DutyCycle = DutyCycleCap;
+    }
+    
     IsInActiveWindow = DutyCycle * WindowSize > millis() - windowStartTime;
   } else {
     DutyCycle = 0;
@@ -273,11 +313,29 @@ void UpdateOutPins() {
   }
 }
 
-void CheckTemperatureSensor() {
+bool CheckTemperatureSensor() {
   if (dht11.read(DHTPin, &temperature, &humidity, data)) {
-    return;
+    return false;
   }
+  
   Input = (double)temperature;
+  
+  return true;
+}
+
+void CalculateMinMax() {
+  if (extremesInitialised) {
+    if (Input < minTemp) {
+      minTemp = Input;
+    }
+    if (Input > maxTemp) {
+      maxTemp = Input;
+    }
+  } else if (Input != 0) {
+    minTemp = Input;
+    maxTemp = Input;
+    extremesInitialised = true;
+  }
 }
 
 bool ReadSwitchSetting() {
